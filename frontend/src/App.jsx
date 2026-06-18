@@ -30,7 +30,7 @@ export default function App() {
   const [uploadedFile, setUploadedFile] = useState(null);
   const [summaryType, setSummaryType] = useState('Bullets');
   const [tone, setTone] = useState('Professional');
-  const [model, setModel] = useState('gemini-1.5-flash');
+  const [model, setModel] = useState('gemini-2.5-flash');
 
   // App UI states
   const [isLoading, setIsLoading] = useState(false);
@@ -520,8 +520,10 @@ export default function App() {
                       cursor: 'pointer'
                     }}
                   >
-                    <option value="gemini-1.5-flash">GEMINI_1.5_FLASH (Lightweight & Fast)</option>
-                    <option value="gemini-1.5-pro">GEMINI_1.5_PRO (Complex Reasoning)</option>
+                    <option value="gemini-2.5-flash">GEMINI_2.5_FLASH (Fast, Default)</option>
+                    <option value="gemini-2.5-pro">GEMINI_2.5_PRO (Complex Reasoning)</option>
+                    <option value="gemini-2.0-flash">GEMINI_2.0_FLASH (Speed Optimized)</option>
+                    <option value="gemini-3.5-flash">GEMINI_3.5_FLASH (Latest Model)</option>
                   </select>
                 </div>
               </div>
