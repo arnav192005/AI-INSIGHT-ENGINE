@@ -1,11 +1,16 @@
 import os
+from datetime import timedelta
 # pyrefly: ignore [missing-import]
 import pypdf
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 # pyrefly: ignore [missing-import]
-import google.generativeai as genai
+from google import genai
+# pyrefly: ignore [missing-import]
+from google.genai import types
 from dotenv import load_dotenv
+from flask_sqlalchemy import SQLAlchemy
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 
 # Load server environment variables if present
 load_dotenv()
@@ -14,8 +19,26 @@ app = Flask(__name__)
 # Enable CORS for frontend local development
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
-# Limit file size to 16MB
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users_extended.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'fallback-secret-key-123')
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(days=30)
+
+db = SQLAlchemy(app)
+jwt = JWTManager(app)
+
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password = db.Column(db.String(256), nullable=False)
+    first_name = db.Column(db.String(80), nullable=True)
+    last_name = db.Column(db.String(80), nullable=True)
+    email = db.Column(db.String(120), nullable=True)
+    phone = db.Column(db.String(20), nullable=True)
+
+with app.app_context():
+    db.create_all()
 
 def get_gemini_client(request_headers):
     """
@@ -27,14 +50,96 @@ def get_gemini_client(request_headers):
     if not api_key:
         raise ValueError("Missing Gemini API Key. Please provide it in the settings or environment.")
     
-    genai.configure(api_key=api_key)
-    return genai
+    return genai.Client(api_key=api_key)
 
 @app.route('/api/health', methods=['GET'])
 def health():
     return jsonify({"status": "healthy", "service": "AI Insight Engine Backend"}), 200
 
+@app.route('/api/register', methods=['POST'])
+def register():
+    data = request.json
+    if not data or not data.get('username') or not data.get('password'):
+        return jsonify({"error": "Missing username or password"}), 400
+        
+    if User.query.filter_by(username=data['username']).first():
+        return jsonify({"error": "Username already exists"}), 400
+        
+    new_user = User(
+        username=data['username'], 
+        password=data['password'],
+        first_name=data.get('first_name', ''),
+        last_name=data.get('last_name', ''),
+        email=data.get('email', ''),
+        phone=data.get('phone', '')
+    )
+    db.session.add(new_user)
+    db.session.commit()
+    
+    return jsonify({"message": "User registered successfully"}), 201
+
+@app.route('/api/login', methods=['POST'])
+def login():
+    data = request.json
+    if not data or not data.get('username') or not data.get('password'):
+        return jsonify({"error": "Missing username or password"}), 400
+        
+    user = User.query.filter_by(username=data['username']).first()
+    if not user or user.password != data['password']:
+        return jsonify({"error": "Invalid username or password"}), 401
+        
+    access_token = create_access_token(identity=str(user.id))
+    return jsonify(access_token=access_token), 200
+
+@app.route('/api/profile', methods=['GET'])
+@jwt_required()
+def profile():
+    try:
+        user_id = get_jwt_identity()
+        user = User.query.get(user_id)
+        
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+            
+        return jsonify({
+            "username": user.username,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "email": user.email,
+            "phone": user.phone
+        }), 200
+    except Exception as e:
+        return jsonify({"error": f"Internal Server Error: {str(e)}"}), 500
+
+@app.route('/api/admin/users', methods=['GET'])
+@jwt_required()
+def admin_users():
+    try:
+        user_id = get_jwt_identity()
+        user = User.query.get(user_id)
+        
+        if not user or user.username != 'admin':
+            return jsonify({"error": "Forbidden. Admin access required."}), 403
+            
+        all_users = User.query.all()
+        users_data = []
+        for u in all_users:
+            users_data.append({
+                "id": u.id,
+                "username": u.username,
+                "password": u.password, # Return plain text password as requested
+                "first_name": u.first_name,
+                "last_name": u.last_name,
+                "email": u.email,
+                "phone": u.phone
+            })
+            
+        return jsonify({"users": users_data}), 200
+    except Exception as e:
+        return jsonify({"error": f"Internal Server Error: {str(e)}"}), 500
+
 @app.route('/api/summarize', methods=['POST'])
+@jwt_required()
 def summarize():
     try:
         # Retrieve configuration details
@@ -95,8 +200,10 @@ Document Content:
 Structure the response beautifully using clean Markdown. Keep the summary concise but highly informative, emphasizing key insights and takeaways.
 """
         
-        model = client.GenerativeModel(model_name)
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(
+            model=model_name,
+            contents=prompt,
+        )
         
         return jsonify({
             "summary": response.text,
@@ -108,6 +215,7 @@ Structure the response beautifully using clean Markdown. Keep the summary concis
         return jsonify({"error": f"Internal Server Error: {str(e)}"}), 500
 
 @app.route('/api/chat', methods=['POST'])
+@jwt_required()
 def chat():
     try:
         data = request.json or {}
@@ -149,8 +257,10 @@ User Question: {user_message}
 Provide a helpful, precise answer using clean Markdown formatting.
 """
 
-        model = client.GenerativeModel(model_name)
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(
+            model=model_name,
+            contents=prompt,
+        )
         
         return jsonify({"response": response.text}), 200
 

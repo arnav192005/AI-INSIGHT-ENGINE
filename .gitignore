@@ -23,3 +23,7 @@ dist/
 *.sw?
 .DS_Store
 .venv/
+
+# Databases
+instance/
+*.db
