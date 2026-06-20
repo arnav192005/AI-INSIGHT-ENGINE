@@ -1,7 +1,9 @@
 import os
+# pyrefly: ignore [missing-import]
 import pypdf
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+# pyrefly: ignore [missing-import]
 import google.generativeai as genai
 from dotenv import load_dotenv
 
